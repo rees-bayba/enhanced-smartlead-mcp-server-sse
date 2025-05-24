@@ -288,14 +288,16 @@ class SmartleadClient {
   }
 }
 
-// Server setup - FIXED: Single argument to Server constructor
-const server = new Server({
-  name: 'enhanced-smartlead-server',
-  version: '1.1.0',
-  capabilities: {
-    tools: {},
-  },
-});
+
+// Server setup - Attempting 3-argument structure based on a working example
+const server = new Server(
+  'enhanced-smartlead-server', // 1st argument: The name of your server (as a string)
+  '1.1.0',                     // 2nd argument: The version of your server (as a string)
+  {                            // 3rd argument: An object for capabilities
+    tools: {}, // We'll keep 'tools' as an empty object here for now,
+                // because you're defining your tools later using server.setRequestHandler
+  }
+);
 
 // Check for required environment variable
 if (!process.env.SMARTLEAD_API_KEY) {
