@@ -19,7 +19,7 @@ if (!SMARTLEAD_API_KEY) {
   process.exit(1);
 }
 
-// API client setup (like Jacob's)
+// API client setup
 const apiClient = axios.create({
   baseURL: 'https://server.smartlead.ai/api/v1',
   params: {
@@ -30,7 +30,7 @@ const apiClient = axios.create({
   },
 });
 
-// Define tools EXACTLY like Jacob does
+// Define tools
 const CAMPAIGN_LIST_TOOL: Tool = {
   name: 'smartlead_list_campaigns',
   description: 'List all campaigns with optional filtering.',
@@ -123,7 +123,7 @@ app.get('/', async (req, res) => {
         }
       );
 
-      // Tool handlers (like Jacob's pattern)
+      // Tool handlers
       server.setRequestHandler(ListToolsRequestSchema, async () => {
         console.error('Tools requested - returning tools');
         return {
@@ -143,7 +143,7 @@ app.get('/', async (req, res) => {
           switch (name) {
             case 'smartlead_list_campaigns': {
               const response = await apiClient.get('/campaigns', { 
-                params: args 
+                params: args || {} 
               });
               return {
                 content: [{
@@ -154,6 +154,9 @@ app.get('/', async (req, res) => {
             }
 
             case 'smartlead_get_campaign': {
+              if (!args || typeof args.campaign_id !== 'number') {
+                throw new Error('campaign_id is required and must be a number');
+              }
               const response = await apiClient.get(`/campaigns/${args.campaign_id}`);
               return {
                 content: [{
@@ -164,6 +167,9 @@ app.get('/', async (req, res) => {
             }
 
             case 'smartlead_get_campaign_analytics': {
+              if (!args || typeof args.campaign_id !== 'number') {
+                throw new Error('campaign_id is required and must be a number');
+              }
               const response = await apiClient.get(
                 `/campaigns/${args.campaign_id}/analytics`
               );
