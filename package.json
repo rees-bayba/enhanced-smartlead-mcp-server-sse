@@ -1,28 +1,20 @@
 {
   "name": "enhanced-smartlead-mcp-server-sse",
   "version": "1.1.0",
-  "description": "Enhanced SmartLead MCP server with analytics and SSE support",
-  "main": "dist/index.js",
-  "type": "module",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist",
-    "prepare": "npm run build"
-  },
-  "keywords": [
-    "mcp",
-    "smartlead",
-    "server"
-  ],
-  "author": "",
-  "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.6.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "enhanced-smartlead-mcp-server-sse",
+      "version": "1.1.0",
+      "license": "MIT",
+      "dependencies": {
+        "@modelcontextprotocol/sdk": "^0.6.0"
+      },
+      "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.3.0"
+      }
+    }
   }
 }
