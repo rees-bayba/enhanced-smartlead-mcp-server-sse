@@ -297,8 +297,14 @@ const server = new Server({
   },
 });
 
+// Check for required environment variable
+if (!process.env.SMARTLEAD_API_KEY) {
+  console.error('ERROR: SMARTLEAD_API_KEY environment variable is not set');
+  process.exit(1);
+}
+
 const smartlead = new SmartleadClient({
-  apiKey: process.env.SMARTLEAD_API_KEY!,
+  apiKey: process.env.SMARTLEAD_API_KEY,
   baseUrl: process.env.SMARTLEAD_API_URL,
   retryMaxAttempts: parseInt(process.env.SMARTLEAD_RETRY_MAX_ATTEMPTS || '3'),
   retryInitialDelay: parseInt(process.env.SMARTLEAD_RETRY_INITIAL_DELAY || '1000'),
