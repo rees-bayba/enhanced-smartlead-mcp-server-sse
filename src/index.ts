@@ -47,15 +47,6 @@ app.get('/', async (req, res) => {
       return;
     }
 
-    // Set up SSE headers FIRST
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    
-    // Create transport with request and response objects
-    const transport = new SSEServerTransport(req, res);
-
     // Create server instance
     const server = new Server(
       {
@@ -80,7 +71,7 @@ app.get('/', async (req, res) => {
 
     console.error(`Registering ${allTools.length} tools`);
 
-    // Setup handlers
+    // Setup handlers BEFORE creating transport
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       console.error('ListTools request received');
       return { tools: allTools };
@@ -123,11 +114,21 @@ app.get('/', async (req, res) => {
       }
     });
 
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    // Create transport and connect AFTER setting up handlers
+    const transport = new SSEServerTransport('/', res);
+    
     try {
       await server.connect(transport);
       console.error('MCP server connected via SSE');
     } catch (error) {
       console.error('Failed to connect MCP server:', error);
+      res.status(500).end();
       return;
     }
     
@@ -142,14 +143,7 @@ app.get('/', async (req, res) => {
       message: 'SmartLead MCP Server',
       status: 'running',
       version: '1.0.0',
-      endpoint: 'SSE endpoint available at root path',
-      tools: [
-        ...campaignTools,
-        ...leadTools,
-        ...analyticsTools,
-        ...replyTools,
-        ...webhookTools
-      ].length + ' tools available'
+      endpoint: 'SSE endpoint available at root path'
     });
   }
 });
