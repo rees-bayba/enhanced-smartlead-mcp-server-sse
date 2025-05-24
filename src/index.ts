@@ -21,7 +21,7 @@ dotenv.config();
 
 // Health check server for Railway
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10); // FIX: Convert to number
 
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', service: 'smartlead-mcp-server' });
