@@ -33,10 +33,12 @@ class SmartleadClient {
   }
 
   private async makeRequest(endpoint: string, options: RequestInit = {}): Promise<any> {
-    const url = `${this.baseUrl}${endpoint}`;
+    // Add API key as query parameter, not header (as per Smartlead docs)
+    const separator = endpoint.includes('?') ? '&' : '?';
+    const url = `${this.baseUrl}${endpoint}${separator}api_key=${this.apiKey}`;
+    
     const headers = {
       'Content-Type': 'application/json',
-      'X-API-KEY': this.apiKey,
       ...options.headers,
     };
 
@@ -287,11 +289,7 @@ class SmartleadClient {
   async searchLeadsByEmail(params: {
     email: string;
   }) {
-    const queryParams = new URLSearchParams({
-      email: params.email,
-    });
-
-    return this.makeRequest(`/leads/search?${queryParams}`);
+    return this.makeRequest(`/leads/?email=${encodeURIComponent(params.email)}`);
   }
 }
 
