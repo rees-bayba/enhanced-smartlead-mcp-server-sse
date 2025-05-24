@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { SmartLeadClient } from '../utils/smartlead-client.js';
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
 
-export const campaignTools = [
+export const campaignTools: Tool[] = [
   {
     name: "campaign_list",
     description: "List all campaigns with their current status and statistics",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         offset: {
           type: "number",
@@ -25,7 +26,7 @@ export const campaignTools = [
     name: "campaign_get",
     description: "Get detailed information about a specific campaign",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         campaignId: {
           type: "number",
@@ -39,7 +40,7 @@ export const campaignTools = [
     name: "campaign_status_update",
     description: "Update campaign status (START, PAUSE, STOP, RESUME)",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         campaignId: {
           type: "number",
