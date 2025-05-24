@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --production
+RUN npm install --production
 
 # Copy the rest of the application
 COPY . .
@@ -15,4 +15,4 @@ COPY . .
 RUN npm run build
 
 # Use Supergateway to wrap the stdio server
-CMD ["npx", "supergateway", "--command", "node", "dist/index.js"]
+CMD ["npx", "supergateway", "--command", "node", "build/index.js"]
