@@ -8,15 +8,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (including dev dependencies for build)
+# Install dependencies
 RUN npm install
 
-# Copy source code and build
+# Copy source code (no build step needed)
 COPY . .
-RUN npm run build
-
-# Remove dev dependencies after build to reduce image size
-RUN npm prune --production
 
 # Set default port
 ENV PORT=8000
@@ -25,7 +21,7 @@ ENV PORT=8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:$PORT/healthz || exit 1
 
-# Start with Supergateway - same as working original
-CMD ["sh", "-c", "supergateway --command='node dist/index.js' --port=$PORT --logLevel=info"]
+# Start with Supergateway - run TypeScript directly with ts-node
+CMD ["sh", "-c", "npx ts-node src/index.ts | supergateway --port=$PORT --logLevel=info"]
 
 EXPOSE $PORT
