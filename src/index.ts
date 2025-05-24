@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import express from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
 
@@ -84,152 +83,104 @@ const GET_CAMPAIGN_ANALYTICS_TOOL: Tool = {
   },
 };
 
-// Express app for SSE
-const app = express();
-const PORT = parseInt(process.env.PORT || '8080', 10);
-
-// CORS
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', '*');
-  res.header('Access-Control-Allow-Headers', '*');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+// Create server
+const server = new Server(
+  {
+    name: 'smartlead-mcp',
+    version: '1.0.0',
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
   }
-  next();
+);
+
+// Setup handlers
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: [
+      CAMPAIGN_LIST_TOOL,
+      GET_CAMPAIGN_TOOL,
+      GET_CAMPAIGN_ANALYTICS_TOOL,
+    ],
+  };
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', tools: 3 });
-});
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
 
-// Main SSE endpoint
-app.get('/', async (req, res) => {
-  if (req.headers.accept?.includes('text/event-stream')) {
-    console.error('SSE connection initiated');
-    
-    try {
-      // Create server instance
-      const server = new Server(
-        {
-          name: 'smartlead-mcp',
-          version: '1.0.0',
-        },
-        {
-          capabilities: {
-            tools: {},
-          },
-        }
-      );
-
-      // Tool handlers
-      server.setRequestHandler(ListToolsRequestSchema, async () => {
-        console.error('Tools requested - returning tools');
+  try {
+    switch (name) {
+      case 'smartlead_list_campaigns': {
+        const response = await apiClient.get('/campaigns', { 
+          params: args || {} 
+        });
         return {
-          tools: [
-            CAMPAIGN_LIST_TOOL,
-            GET_CAMPAIGN_TOOL,
-            GET_CAMPAIGN_ANALYTICS_TOOL,
-          ],
+          content: [{
+            type: 'text',
+            text: JSON.stringify(response.data, null, 2),
+          }],
         };
-      });
-
-      server.setRequestHandler(CallToolRequestSchema, async (request) => {
-        const { name, arguments: args } = request.params;
-        console.error(`Tool called: ${name}`);
-
-        try {
-          switch (name) {
-            case 'smartlead_list_campaigns': {
-              const response = await apiClient.get('/campaigns', { 
-                params: args || {} 
-              });
-              return {
-                content: [{
-                  type: 'text',
-                  text: JSON.stringify(response.data, null, 2),
-                }],
-              };
-            }
-
-            case 'smartlead_get_campaign': {
-              if (!args || typeof args.campaign_id !== 'number') {
-                throw new Error('campaign_id is required and must be a number');
-              }
-              const response = await apiClient.get(`/campaigns/${args.campaign_id}`);
-              return {
-                content: [{
-                  type: 'text',
-                  text: JSON.stringify(response.data, null, 2),
-                }],
-              };
-            }
-
-            case 'smartlead_get_campaign_analytics': {
-              if (!args || typeof args.campaign_id !== 'number') {
-                throw new Error('campaign_id is required and must be a number');
-              }
-              const response = await apiClient.get(
-                `/campaigns/${args.campaign_id}/analytics`
-              );
-              return {
-                content: [{
-                  type: 'text',
-                  text: JSON.stringify(response.data, null, 2),
-                }],
-              };
-            }
-
-            default:
-              return {
-                content: [{
-                  type: 'text',
-                  text: `Unknown tool: ${name}`,
-                }],
-                isError: true,
-              };
-          }
-        } catch (error) {
-          const errorMessage = axios.isAxiosError(error)
-            ? `API Error: ${error.response?.data?.message || error.message}`
-            : `Error: ${error instanceof Error ? error.message : String(error)}`;
-
-          return {
-            content: [{ type: 'text', text: errorMessage }],
-            isError: true,
-          };
-        }
-      });
-
-      // Create transport and connect
-      const transport = new SSEServerTransport('/', res);
-      await server.connect(transport);
-      console.error('MCP server connected');
-
-      // Handle disconnect
-      req.on('close', () => {
-        console.error('Client disconnected');
-        server.close().catch(console.error);
-      });
-
-    } catch (error) {
-      console.error('Error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to establish SSE connection' });
       }
+
+      case 'smartlead_get_campaign': {
+        if (!args || typeof args.campaign_id !== 'number') {
+          throw new Error('campaign_id is required and must be a number');
+        }
+        const response = await apiClient.get(`/campaigns/${args.campaign_id}`);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(response.data, null, 2),
+          }],
+        };
+      }
+
+      case 'smartlead_get_campaign_analytics': {
+        if (!args || typeof args.campaign_id !== 'number') {
+          throw new Error('campaign_id is required and must be a number');
+        }
+        const response = await apiClient.get(
+          `/campaigns/${args.campaign_id}/analytics`
+        );
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify(response.data, null, 2),
+          }],
+        };
+      }
+
+      default:
+        return {
+          content: [{
+            type: 'text',
+            text: `Unknown tool: ${name}`,
+          }],
+          isError: true,
+        };
     }
-  } else {
-    // Regular HTTP request
-    res.json({
-      name: 'smartlead-mcp',
-      version: '1.0.0',
-      tools: 3,
-    });
+  } catch (error) {
+    const errorMessage = axios.isAxiosError(error)
+      ? `API Error: ${error.response?.data?.message || error.message}`
+      : `Error: ${error instanceof Error ? error.message : String(error)}`;
+
+    return {
+      content: [{ type: 'text', text: errorMessage }],
+      isError: true,
+    };
   }
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.error(`Smartlead MCP Server running on port ${PORT}`);
+// Run server
+async function runServer() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('Smartlead MCP Server running on stdio');
+}
+
+runServer().catch((error) => {
+  console.error('Fatal error:', error);
+  process.exit(1);
 });
