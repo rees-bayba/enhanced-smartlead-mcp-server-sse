@@ -71,7 +71,7 @@ class SmartleadClient {
 
   // EXISTING METHODS (from working original server)
   async createCampaign(params: { name: string; client_id?: number }) {
-    return this.makeRequest('/campaigns', {
+    return this.makeRequest('/campaigns/create', {
       method: 'POST',
       body: JSON.stringify(params),
     });
@@ -88,7 +88,7 @@ class SmartleadClient {
     schedule_start_time?: string;
   }) {
     return this.makeRequest(`/campaigns/${params.campaign_id}/schedule`, {
-      method: 'PUT',
+      method: 'POST',
       body: JSON.stringify(params),
     });
   }
@@ -99,8 +99,8 @@ class SmartleadClient {
     status?: string;
     settings?: any;
   }) {
-    return this.makeRequest(`/campaigns/${params.campaign_id}`, {
-      method: 'PUT',
+    return this.makeRequest(`/campaigns/${params.campaign_id}/settings`, {
+      method: 'POST',
       body: JSON.stringify(params),
     });
   }
@@ -205,7 +205,7 @@ class SmartleadClient {
     lead: any;
   }) {
     return this.makeRequest(`/campaigns/${params.campaign_id}/leads/${params.lead_id}`, {
-      method: 'PUT',
+      method: 'POST',
       body: JSON.stringify(params),
     });
   }
@@ -224,16 +224,11 @@ class SmartleadClient {
     campaign_id: number;
     offset?: number;
     limit?: number;
-    status_filter?: string;
   }) {
     const queryParams = new URLSearchParams({
       offset: (params.offset || 0).toString(),
       limit: (params.limit || 50).toString(),
     });
-    
-    if (params.status_filter) {
-      queryParams.append('status_filter', params.status_filter);
-    }
 
     return this.makeRequest(`/campaigns/${params.campaign_id}/leads?${queryParams}`);
   }
@@ -264,7 +259,7 @@ class SmartleadClient {
     campaign_id: number;
     lead_id: number;
   }) {
-    return this.makeRequest(`/campaigns/${params.campaign_id}/leads/${params.lead_id}/messages`);
+    return this.makeRequest(`/campaigns/${params.campaign_id}/leads/${params.lead_id}/message-history`);
   }
 
   async getCampaignAnalytics(params: {
@@ -520,14 +515,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // NEW ENHANCED ANALYTICS TOOLS
       {
         name: 'smartlead_list_leads_by_campaign',
-        description: 'List all leads in a campaign with their current status and sequence position.',
+        description: 'List all leads in a campaign with their current status.',
         inputSchema: {
           type: 'object',
           properties: {
             campaign_id: { type: 'number', description: 'ID of the campaign' },
             offset: { type: 'number', description: 'Offset for pagination' },
             limit: { type: 'number', description: 'Maximum number of leads to return' },
-            status_filter: { type: 'string', description: 'Filter leads by status (STARTED, COMPLETED, BLOCKED, INPROGRESS)' },
           },
           required: ['campaign_id'],
         },
@@ -540,7 +534,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             campaign_id: { type: 'number', description: 'ID of the campaign' },
             email_sequence_number: { type: 'number', description: 'Filter by specific sequence number' },
-            email_status: { type: 'string', description: 'Filter by email status' },
+            email_status: { type: 'string', description: 'Filter by email status (opened, clicked, replied, unsubscribed, bounced)' },
             offset: { type: 'number', description: 'Offset for pagination' },
             limit: { type: 'number', description: 'Maximum number of results to return' },
           },
