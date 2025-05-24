@@ -7,11 +7,16 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-RUN npm install --only=production
+
+# Install ALL dependencies (including dev dependencies for build)
+RUN npm install
 
 # Copy source code and build
 COPY . .
 RUN npm run build
+
+# Remove dev dependencies after build to reduce image size
+RUN npm prune --production
 
 # Set default port
 ENV PORT=8000
