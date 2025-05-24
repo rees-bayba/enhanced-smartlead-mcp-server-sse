@@ -6,7 +6,6 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import express from 'express';
-import { createServer } from 'http';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -56,13 +55,88 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', tools: TOOLS.length });
 });
 
-// Root endpoint info
-app.get('/', (req, res) => {
-  // Check if this is an SSE request
+// Root endpoint - handles both SSE and regular requests
+app.get('/', async (req, res) => {
   const acceptHeader = req.headers.accept || '';
   
   if (acceptHeader.includes('text/event-stream')) {
-    handleSSE(req, res);
+    console.log('[SSE] New connection request');
+    
+    // DON'T set headers here - let SSEServerTransport handle it!
+    
+    try {
+      // Create MCP server
+      const server = new Server(
+        {
+          name: 'smartlead-mcp-server',
+          version: '1.0.0'
+        },
+        {
+          capabilities: {
+            tools: {}
+          }
+        }
+      );
+
+      // Set up tool listing handler
+      server.setRequestHandler(ListToolsRequestSchema, async () => {
+        console.log('[MCP] Tools requested');
+        return { tools: TOOLS };
+      });
+
+      // Set up tool calling handler
+      server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        const { name, arguments: args } = request.params;
+        console.log(`[MCP] Tool called: ${name}`);
+
+        switch (name) {
+          case 'test_connection':
+            return {
+              content: [{
+                type: 'text',
+                text: '✅ MCP connection is working correctly!'
+              }]
+            };
+
+          case 'get_campaigns':
+            // Return mock data for now
+            return {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  campaigns: [
+                    { id: 1, name: 'Test Campaign 1', status: 'active' },
+                    { id: 2, name: 'Test Campaign 2', status: 'paused' }
+                  ],
+                  total: 2
+                }, null, 2)
+              }]
+            };
+
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+      });
+
+      // Create transport and let IT handle the SSE setup
+      const transport = new SSEServerTransport('/', res);
+      
+      // Connect
+      await server.connect(transport);
+      console.log('[MCP] Server connected successfully');
+
+      // Handle client disconnect
+      req.on('close', () => {
+        console.log('[SSE] Client disconnected');
+        server.close().catch(console.error);
+      });
+
+    } catch (error) {
+      console.error('[SSE] Error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'SSE connection failed' });
+      }
+    }
   } else {
     // Regular HTTP request - return server info
     res.json({
@@ -77,108 +151,8 @@ app.get('/', (req, res) => {
   }
 });
 
-// SSE handler
-async function handleSSE(req: express.Request, res: express.Response) {
-  console.log('[SSE] New connection request');
-  
-  // Set SSE headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no' // Disable Nginx buffering
-  });
-
-  // Send initial data to establish connection
-  res.write('\n');
-  
-  try {
-    // Create MCP server
-    const server = new Server(
-      {
-        name: 'smartlead-mcp-server',
-        version: '1.0.0'
-      },
-      {
-        capabilities: {
-          tools: {}
-        }
-      }
-    );
-
-    // Set up tool listing handler
-    server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.log('[MCP] Tools requested');
-      return { tools: TOOLS };
-    });
-
-    // Set up tool calling handler
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
-      console.log(`[MCP] Tool called: ${name}`);
-
-      switch (name) {
-        case 'test_connection':
-          return {
-            content: [{
-              type: 'text',
-              text: '✅ MCP connection is working correctly!'
-            }]
-          };
-
-        case 'get_campaigns':
-          // Return mock data for now
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                campaigns: [
-                  { id: 1, name: 'Campaign 1', status: 'active' },
-                  { id: 2, name: 'Campaign 2', status: 'paused' }
-                ],
-                total: 2
-              }, null, 2)
-            }]
-          };
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    });
-
-    // Connect transport
-    const transport = new SSEServerTransport('/', res);
-    await server.connect(transport);
-    
-    console.log('[MCP] Server connected successfully');
-
-    // Keep-alive ping every 30 seconds
-    const pingInterval = setInterval(() => {
-      try {
-        res.write(':ping\n\n');
-      } catch (e) {
-        clearInterval(pingInterval);
-      }
-    }, 30000);
-
-    // Handle client disconnect
-    req.on('close', () => {
-      console.log('[SSE] Client disconnected');
-      clearInterval(pingInterval);
-      server.close().catch(console.error);
-    });
-
-  } catch (error) {
-    console.error('[SSE] Error:', error);
-    res.end();
-  }
-}
-
-// Create HTTP server
-const httpServer = createServer(app);
-
 // Start server
-httpServer.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`SmartLead MCP Server running on port ${PORT}`);
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`Tools available: ${TOOLS.length}`);
@@ -187,8 +161,5 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
-  httpServer.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
+  process.exit(0);
 });
