@@ -427,7 +427,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             limit: { type: 'number', description: 'Maximum number of campaigns to return' },
             offset: { type: 'number', description: 'Offset for pagination' },
-            status: { type: 'string', enum: ['active', 'paused', 'completed', 'all'], description: 'Filter campaigns by status' },
+            status: { 
+              type: 'string', 
+              // enum: ['active', 'paused', 'completed', 'all'], // <-- THIS LINE IS COMMENTED OUT FOR TESTING
+              description: 'Filter campaigns by status' 
+            },
           },
         },
       },
