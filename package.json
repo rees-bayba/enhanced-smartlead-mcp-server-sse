@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node build/index.js",
-    "dev": "tsx src/index.ts"
+    "start": "npx supergateway --command node build/index.js",
+    "dev": "tsx src/index.ts",
+    "start:direct": "node build/index.js"
   },
   "keywords": [
     "mcp",
