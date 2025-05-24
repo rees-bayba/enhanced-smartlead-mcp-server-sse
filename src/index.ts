@@ -295,18 +295,14 @@ class SmartleadClient {
   }
 }
 
-// Server setup - exactly like the working original
-const server = new Server(
-  {
-    name: 'enhanced-smartlead-server',
-    version: '1.1.0',
+// Server setup - FIXED: Single argument to Server constructor
+const server = new Server({
+  name: 'enhanced-smartlead-server',
+  version: '1.1.0',
+  capabilities: {
+    tools: {},
   },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+});
 
 const smartlead = new SmartleadClient({
   apiKey: process.env.SMARTLEAD_API_KEY!,
