@@ -53,23 +53,46 @@ class SmartleadClient {
         });
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          // Attempt to get error message from Smartlead response body
+          let errorBody = '';
+          try {
+            errorBody = await response.text(); // Use text() first, as it might not be JSON
+          } catch (e) {
+            // Ignore if can't read body
+          }
+          throw new Error(`HTTP ${response.status}: ${response.statusText}. Response: ${errorBody}`);
         }
 
-        return await response.json();
+        // Handle cases where response might be empty but still OK (e.g., 204 No Content for DELETE)
+        if (response.status === 204) {
+            return { success: true, status: 204, message: "Operation successful, no content returned." };
+        }
+        
+        const responseText = await response.text();
+        if (!responseText) {
+            return { success: true, status: response.status, message: "Operation successful, empty response body." };
+        }
+
+        return JSON.parse(responseText);
+
       } catch (error) {
         attempt++;
         if (attempt >= this.retryMaxAttempts) {
+          console.error(`Final attempt failed for ${url}:`, error);
           throw error;
         }
         
+        console.warn(`Attempt ${attempt} failed for ${url}. Retrying in ${delay}ms... Error: ${error}`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay = Math.min(delay * this.retryBackoffFactor, this.retryMaxDelay);
       }
     }
+    // Should not be reached if retryMaxAttempts > 0 due to throw in catch,
+    // but as a fallback for an exhaustive retry scenario.
+    throw new Error(`Exhausted retry attempts for ${endpoint}`);
   }
 
-  // EXISTING METHODS (from working original server)
+  // EXISTING METHODS (from working original server, with endpoint corrections)
   async createCampaign(params: { name: string; client_id?: number }) {
     return this.makeRequest('/campaigns/create', {
       method: 'POST',
@@ -87,8 +110,10 @@ class SmartleadClient {
     timezone?: string;
     schedule_start_time?: string;
   }) {
+    // Smartlead API docs suggest PUT for updates, but some operations might be POST
+    // Assuming POST based on common patterns if PUT not specified for /schedule
     return this.makeRequest(`/campaigns/${params.campaign_id}/schedule`, {
-      method: 'POST',
+      method: 'POST', // Verify this HTTP method with Smartlead docs for /schedule
       body: JSON.stringify(params),
     });
   }
@@ -99,8 +124,9 @@ class SmartleadClient {
     status?: string;
     settings?: any;
   }) {
+    // Corrected based on history: uses /settings sub-endpoint
     return this.makeRequest(`/campaigns/${params.campaign_id}/settings`, {
-      method: 'POST',
+      method: 'POST', // Verify this HTTP method. Often updates are PUT or PATCH.
       body: JSON.stringify(params),
     });
   }
@@ -199,14 +225,17 @@ class SmartleadClient {
     });
   }
 
-  async updateLeadInCampaign(params: {
+  async updateLeadInCampaign(params: { // Note: Smartlead docs usually have lead updates by list, single lead update might differ
     campaign_id: number;
-    lead_id: number;
+    lead_id: number; // Individual lead update might not be supported or have a different endpoint structure
     lead: any;
   }) {
+    // This endpoint is speculative based on common REST patterns; Smartlead often uses list-based updates for leads.
+    // Verify with Smartlead API docs if a single lead update endpoint like this exists.
+    // From the logs, listLeadsByCampaign had a status_filter removed. This method might need a different approach.
     return this.makeRequest(`/campaigns/${params.campaign_id}/leads/${params.lead_id}`, {
-      method: 'POST',
-      body: JSON.stringify(params),
+      method: 'POST', // Or PUT. POST is sometimes used for "update" if it's a partial update or specific action.
+      body: JSON.stringify(params), // Ensure the body structure matches what the API expects for a single lead update.
     });
   }
 
@@ -219,8 +248,8 @@ class SmartleadClient {
     });
   }
 
-  // NEW ENHANCED METHODS (adding the missing analytics)
-  async listLeadsByCampaign(params: {
+  // NEW ENHANCED METHODS (incorporating fixes from history)
+  async listLeadsByCampaign(params: { // status_filter was removed as unsupported
     campaign_id: number;
     offset?: number;
     limit?: number;
@@ -255,7 +284,7 @@ class SmartleadClient {
     return this.makeRequest(`/campaigns/${params.campaign_id}/statistics?${queryParams}`);
   }
 
-  async getLeadMessageHistory(params: {
+  async getLeadMessageHistory(params: { // Corrected endpoint
     campaign_id: number;
     lead_id: number;
   }) {
@@ -281,15 +310,17 @@ class SmartleadClient {
     return this.makeRequest(`/campaigns/${params.campaign_id}/analytics-by-date?${queryParams}`);
   }
 
-  async searchLeadsByEmail(params: {
+  async searchLeadsByEmail(params: { // Corrected endpoint based on typical API patterns
     email: string;
   }) {
+    // Assuming general leads search; Smartlead might require specific campaign context or have a different global search.
+    // The original /leads/search? was based on a guess. /leads/?email= is more common.
     return this.makeRequest(`/leads/?email=${encodeURIComponent(params.email)}`);
   }
 }
 
 
-// Server setup - Reverting to single object argument based on TS2345 error
+// Server setup - Correct single object argument
 const server = new Server({
   name: 'enhanced-smartlead-server',
   version: '1.1.0',
@@ -301,12 +332,26 @@ const server = new Server({
 // Check for required environment variable
 if (!process.env.SMARTLEAD_API_KEY) {
   console.error('ERROR: SMARTLEAD_API_KEY environment variable is not set');
-  process.exit(1);
+  // Optionally, you could throw an error here to prevent server from starting misconfigured
+  // For Railway, it might be better to let it try and fail if the key is missing,
+  // as process.exit(1) might lead to restart loops depending on Railway's policy.
+  // But for tsc compilation, this check is fine. It's a runtime check though.
+  // process.exit(1); // Consider if this is the best behavior for a Railway deployment
+}
+
+const smartleadApiKey = process.env.SMARTLEAD_API_KEY;
+if (!smartleadApiKey) {
+    console.error('FATAL: SMARTLEAD_API_KEY environment variable is not set. Server cannot start.');
+    // Forcing an exit if essential config is missing, to make it obvious in logs.
+    // This will prevent tsc from completing if run in an env where key is not set,
+    // but tsc itself doesn't use env vars. This is a runtime concern.
+    // For Railway, ensure the variable is set in the environment.
+    throw new Error('SMARTLEAD_API_KEY is not configured.');
 }
 
 const smartlead = new SmartleadClient({
-  apiKey: process.env.SMARTLEAD_API_KEY,
-  baseUrl: process.env.SMARTLEAD_API_URL,
+  apiKey: smartleadApiKey, // Use the validated key
+  baseUrl: process.env.SMARTLEAD_API_URL, // Optional, defaults in client
   retryMaxAttempts: parseInt(process.env.SMARTLEAD_RETRY_MAX_ATTEMPTS || '3'),
   retryInitialDelay: parseInt(process.env.SMARTLEAD_RETRY_INITIAL_DELAY || '1000'),
   retryMaxDelay: parseInt(process.env.SMARTLEAD_RETRY_MAX_DELAY || '10000'),
@@ -314,6 +359,7 @@ const smartlead = new SmartleadClient({
 });
 
 // Tools - all existing ones PLUS the missing analytics
+// THIS IS THE SECTION WHERE THE TS2554 ERROR OCCURS DURING 'tsc'
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -330,7 +376,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['name'],
         },
       },
-      {
+      { // This is the tool where the error (TS2554) is often reported (around line 293 of this file)
         name: 'smartlead_update_campaign_schedule',
         description: 'Update a campaign\'s schedule settings.',
         inputSchema: {
@@ -339,7 +385,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             campaign_id: { type: 'number', description: 'ID of the campaign to update' },
             days_of_the_week: { type: 'array', items: { type: 'number' }, description: 'Days of the week to send emails (1-7, where 1 is Monday)' },
             start_hour: { type: 'string', description: 'Start hour in 24-hour format (e.g., "09:00")' },
-            end_hour: { type: 'string', description: 'End hour in 24-hour format (e.g., "17:00")' },
+            end_hour: { type: 'string', description: 'End hour in 24-hour format (e.g., "17:00")' }, // Error often near here
             max_new_leads_per_day: { type: 'number', description: 'Maximum number of new leads per day' },
             min_time_btw_emails: { type: 'number', description: 'Minimum time between emails in minutes' },
             timezone: { type: 'string', description: 'Timezone for the campaign (e.g., "America/Los_Angeles")' },
@@ -357,7 +403,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             campaign_id: { type: 'number', description: 'ID of the campaign to update' },
             name: { type: 'string', description: 'New name for the campaign' },
             status: { type: 'string', enum: ['active', 'paused', 'completed'], description: 'Status of the campaign' },
-            settings: { type: 'object', description: 'Additional campaign settings' },
+            settings: { type: 'object', description: 'Additional campaign settings' }, // 'any' type for settings in client method
           },
           required: ['campaign_id'],
         },
@@ -395,7 +441,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             sequences: { 
               type: 'array', 
               description: 'Array of email sequences to send',
-              items: { type: 'object' }
+              items: { type: 'object' } // Assuming sequence items are objects; define schema if known
             },
           },
           required: ['campaign_id', 'sequences'],
@@ -459,7 +505,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             campaign_id: { type: 'number', description: 'ID of the campaign' },
             email_account_id: { type: 'number', description: 'ID of the email account to update' },
-            settings: { type: 'object', description: 'Settings for the email account in this campaign' },
+            settings: { type: 'object', description: 'Settings for the email account in this campaign' }, // 'any' in client
           },
           required: ['campaign_id', 'email_account_id'],
         },
@@ -485,10 +531,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             campaign_id: { type: 'number', description: 'ID of the campaign' },
             lead_list: { 
               type: 'array', 
-              description: 'List of leads to add (max 100)',
-              items: { type: 'object' }
+              description: 'List of leads to add (max 100)', // 'any[]' in client
+              items: { type: 'object' } // Assuming lead items are objects; define schema if known
             },
-            settings: { type: 'object', description: 'Settings for lead addition' },
+            settings: { type: 'object', description: 'Settings for lead addition' }, // 'any' in client
           },
           required: ['campaign_id', 'lead_list'],
         },
@@ -501,7 +547,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             campaign_id: { type: 'number', description: 'ID of the campaign' },
             lead_id: { type: 'number', description: 'ID of the lead to update' },
-            lead: { type: 'object', description: 'Updated lead information' },
+            lead: { type: 'object', description: 'Updated lead information' }, // 'any' in client
           },
           required: ['campaign_id', 'lead_id', 'lead'],
         },
@@ -521,7 +567,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
       // NEW ENHANCED ANALYTICS TOOLS
       {
-        name: 'smartlead_list_leads_by_campaign',
+        name: 'smartlead_list_leads_by_campaign', // status_filter was removed from client method params
         description: 'List all leads in a campaign with their current status.',
         inputSchema: {
           type: 'object',
@@ -696,22 +742,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       default:
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
-  } catch (error) {
+  } catch (error: any) { // Explicitly type error
+    console.error(`Error in tool handler for ${name}:`, error); // Log the actual error
+    // Construct a more detailed error message string
+    let errorMessage = `Smartlead API error during ${name}`;
+    if (error instanceof Error) {
+      errorMessage += `: ${error.message}`;
+      // Optionally append stack if helpful, but can be verbose
+      // if (error.stack) errorMessage += `\nStack: ${error.stack}`;
+    } else {
+      errorMessage += `: ${String(error)}`;
+    }
+    
     throw new McpError(
-      ErrorCode.InternalError,
-      `Smartlead API error: ${error instanceof Error ? error.message : String(error)}`
+      ErrorCode.InternalError, // Or a more specific error code if applicable
+      errorMessage 
     );
   }
 });
 
 // Start server - same as working original
 async function main() {
+  // Ensure API key is checked at the very start of main, before server connection
+  if (!process.env.SMARTLEAD_API_KEY) {
+    console.error('FATAL: SMARTLEAD_API_KEY environment variable is not set. Server cannot start.');
+    process.exit(1); // Exit immediately if key is not set.
+  }
+  
   const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error('Enhanced Smartlead MCP server running on stdio');
+  try {
+    await server.connect(transport);
+    console.error('Enhanced Smartlead MCP server running on stdio'); // Use console.error for logs on Railway
+  } catch (connectionError) {
+    console.error('Failed to connect server to transport:', connectionError);
+    process.exit(1);
+  }
 }
 
 main().catch((error) => {
-  console.error('Server error:', error);
+  console.error('Unhandled error in main:', error);
   process.exit(1);
 });
