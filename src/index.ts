@@ -320,14 +320,17 @@ class SmartleadClient {
 }
 
 
-// Server setup - Correct single object argument
-const server = new Server({
-  name: 'enhanced-smartlead-server',
-  version: '1.1.0',
-  capabilities: {
-    tools: {},
+const server = new Server(
+  {
+    name: 'enhanced-smartlead-server',
+    version: '1.1.0',
   },
-});
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
 
 // Check for required environment variable
 if (!process.env.SMARTLEAD_API_KEY) {
