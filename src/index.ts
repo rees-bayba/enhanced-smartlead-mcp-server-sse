@@ -4,45 +4,26 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool
 } from "@modelcontextprotocol/sdk/types.js";
 import express from 'express';
+import { createServer } from 'http';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
-
-// Enable CORS
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy' });
-});
-
-// Simple test tools to verify connection
-const testTools: Tool[] = [
+// Simple tools for testing
+const TOOLS = [
   {
     name: "test_connection",
-    description: "Test if MCP connection is working",
+    description: "Test if the MCP connection is working",
     inputSchema: {
       type: "object" as const,
       properties: {}
     }
   },
   {
-    name: "campaign_list",
-    description: "List all SmartLead campaigns",
+    name: "get_campaigns",
+    description: "Get list of SmartLead campaigns",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -56,27 +37,67 @@ const testTools: Tool[] = [
   }
 ];
 
-// SSE endpoint
-app.get('/', async (req, res) => {
-  if (req.headers.accept?.includes('text/event-stream')) {
-    console.error('=== NEW SSE CONNECTION ===');
-    
-    // CRITICAL: Set SSE headers before anything else
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
+const app = express();
+const PORT = parseInt(process.env.PORT || '8080', 10);
+
+// CORS middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', tools: TOOLS.length });
+});
+
+// Root endpoint info
+app.get('/', (req, res) => {
+  // Check if this is an SSE request
+  const acceptHeader = req.headers.accept || '';
+  
+  if (acceptHeader.includes('text/event-stream')) {
+    handleSSE(req, res);
+  } else {
+    // Regular HTTP request - return server info
+    res.json({
+      name: 'SmartLead MCP Server',
+      version: '1.0.0',
+      mcp: {
+        endpoint: '/',
+        transport: 'sse',
+        tools: TOOLS.length
+      }
     });
-    
-    // Send initial comment to establish connection
-    res.write(':ok\n\n');
-    
-    // Create server
+  }
+});
+
+// SSE handler
+async function handleSSE(req: express.Request, res: express.Response) {
+  console.log('[SSE] New connection request');
+  
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no' // Disable Nginx buffering
+  });
+
+  // Send initial data to establish connection
+  res.write('\n');
+  
+  try {
+    // Create MCP server
     const server = new Server(
       {
-        name: "smartlead-mcp-server",
-        version: "1.0.0",
+        name: 'smartlead-mcp-server',
+        version: '1.0.0'
       },
       {
         capabilities: {
@@ -85,72 +106,89 @@ app.get('/', async (req, res) => {
       }
     );
 
-    // Setup handlers
+    // Set up tool listing handler
     server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.error('=== LIST TOOLS REQUEST ===');
-      return { tools: testTools };
+      console.log('[MCP] Tools requested');
+      return { tools: TOOLS };
     });
 
+    // Set up tool calling handler
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      console.error(`=== CALL TOOL: ${request.params.name} ===`);
-      
-      if (request.params.name === 'test_connection') {
-        return {
-          content: [{
-            type: "text",
-            text: "MCP connection is working! ✅"
-          }]
-        };
+      const { name, arguments: args } = request.params;
+      console.log(`[MCP] Tool called: ${name}`);
+
+      switch (name) {
+        case 'test_connection':
+          return {
+            content: [{
+              type: 'text',
+              text: '✅ MCP connection is working correctly!'
+            }]
+          };
+
+        case 'get_campaigns':
+          // Return mock data for now
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                campaigns: [
+                  { id: 1, name: 'Campaign 1', status: 'active' },
+                  { id: 2, name: 'Campaign 2', status: 'paused' }
+                ],
+                total: 2
+              }, null, 2)
+            }]
+          };
+
+        default:
+          throw new Error(`Unknown tool: ${name}`);
       }
-      
-      if (request.params.name === 'campaign_list') {
-        // For now, return mock data to test
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              campaigns: [
-                { id: 1, name: "Test Campaign 1", status: "active" },
-                { id: 2, name: "Test Campaign 2", status: "paused" }
-              ],
-              total: 2
-            }, null, 2)
-          }]
-        };
-      }
-      
-      throw new Error(`Unknown tool: ${request.params.name}`);
     });
 
-    // Create transport and connect
+    // Connect transport
     const transport = new SSEServerTransport('/', res);
     await server.connect(transport);
-    console.error('=== MCP SERVER CONNECTED ===');
     
-    // Keep connection alive
-    const keepAlive = setInterval(() => {
-      res.write(':keepalive\n\n');
+    console.log('[MCP] Server connected successfully');
+
+    // Keep-alive ping every 30 seconds
+    const pingInterval = setInterval(() => {
+      try {
+        res.write(':ping\n\n');
+      } catch (e) {
+        clearInterval(pingInterval);
+      }
     }, 30000);
-    
-    // Handle disconnect
+
+    // Handle client disconnect
     req.on('close', () => {
-      console.error('=== CLIENT DISCONNECTED ===');
-      clearInterval(keepAlive);
-      server.close();
+      console.log('[SSE] Client disconnected');
+      clearInterval(pingInterval);
+      server.close().catch(console.error);
     });
-    
-  } else {
-    // Regular HTTP request
-    res.json({
-      message: 'SmartLead MCP Server',
-      status: 'running',
-      mcp_endpoint: 'SSE available at /',
-      test: 'Visit this URL with Accept: text/event-stream header'
-    });
+
+  } catch (error) {
+    console.error('[SSE] Error:', error);
+    res.end();
   }
+}
+
+// Create HTTP server
+const httpServer = createServer(app);
+
+// Start server
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`SmartLead MCP Server running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Tools available: ${TOOLS.length}`);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Test with: curl -H "Accept: text/event-stream" http://localhost:${PORT}/`);
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  httpServer.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
