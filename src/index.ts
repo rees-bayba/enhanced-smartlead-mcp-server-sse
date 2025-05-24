@@ -289,16 +289,14 @@ class SmartleadClient {
 }
 
 
-// Server setup - Attempting 2-argument structure based on the error message
-const server = new Server(
-  'enhanced-smartlead-server', // Argument 1: name (string)
-  {                             // Argument 2: options (object)
-    version: '1.1.0',
-    capabilities: {
-      tools: {}, // Keeping this empty as tools are registered later
-    },
-  }
-);
+// Server setup - Reverting to single object argument based on TS2345 error
+const server = new Server({
+  name: 'enhanced-smartlead-server',
+  version: '1.1.0',
+  capabilities: {
+    tools: {},
+  },
+});
 
 // Check for required environment variable
 if (!process.env.SMARTLEAD_API_KEY) {
