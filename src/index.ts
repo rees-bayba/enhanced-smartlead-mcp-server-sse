@@ -24,12 +24,7 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Enable CORS for Claude Desktop
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+app.use(cors());
 
 app.use(express.json());
 
@@ -42,20 +37,17 @@ app.get('/health', (req, res) => {
 app.get('/', async (req, res) => {
   // Check if this is an SSE request from Claude
   if (req.headers.accept?.includes('text/event-stream')) {
+    console.error('SSE connection requested');
+    
     const apiKey = req.headers.authorization?.replace('Bearer ', '') || process.env.SMARTLEAD_API_KEY;
     
     if (!apiKey) {
+      console.error('No API key provided');
       res.status(401).json({ error: 'API key required' });
       return;
     }
 
-    // Set up SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-
-    const transport = new SSEServerTransport('/', res);
+    // Create server instance
     const server = new Server(
       {
         name: "smartlead-mcp-server",
@@ -68,7 +60,7 @@ app.get('/', async (req, res) => {
       }
     );
 
-    // Setup handlers
+    // Combine all tools
     const allTools = [
       ...campaignTools,
       ...leadTools,
@@ -77,11 +69,16 @@ app.get('/', async (req, res) => {
       ...webhookTools
     ];
 
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: allTools,
-    }));
+    console.error(`Registering ${allTools.length} tools`);
+
+    // Setup handlers BEFORE creating transport
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
+      console.error('ListTools request received');
+      return { tools: allTools };
+    });
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      console.error(`CallTool request for: ${request.params.name}`);
       const { name, arguments: args } = request.params;
 
       try {
@@ -107,6 +104,7 @@ app.get('/', async (req, res) => {
           `Unknown tool: ${name}`
         );
       } catch (error) {
+        console.error('Tool execution error:', error);
         if (error instanceof McpError) throw error;
         
         throw new McpError(
@@ -116,10 +114,27 @@ app.get('/', async (req, res) => {
       }
     });
 
-    await server.connect(transport);
+    // Set up SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    // Create transport and connect AFTER setting up handlers
+    const transport = new SSEServerTransport('/', res);
+    
+    try {
+      await server.connect(transport);
+      console.error('MCP server connected via SSE');
+    } catch (error) {
+      console.error('Failed to connect MCP server:', error);
+      res.status(500).end();
+      return;
+    }
     
     // Handle connection close
     req.on('close', () => {
+      console.error('SSE connection closed');
       server.close();
     });
   } else {
@@ -131,6 +146,12 @@ app.get('/', async (req, res) => {
       endpoint: 'SSE endpoint available at root path'
     });
   }
+});
+
+// Error handling
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Express error:', err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
