@@ -19,11 +19,18 @@ import { webhookTools, handleWebhookTool } from './tools/webhooks.js';
 // Load environment variables
 dotenv.config();
 
-const API_KEY = process.env.SMARTLEAD_API_KEY;
-if (!API_KEY) {
-  console.error('SMARTLEAD_API_KEY environment variable is required');
-  process.exit(1);
+// Validate and get API key
+function getApiKey(): string {
+  const apiKey = process.env.SMARTLEAD_API_KEY;
+  if (!apiKey) {
+    console.error('SMARTLEAD_API_KEY environment variable is required');
+    process.exit(1);
+  }
+  return apiKey;
 }
+
+// Get the API key once - TypeScript knows this is always a string
+const SMARTLEAD_API_KEY = getApiKey();
 
 // Combine all tools
 const ALL_TOOLS = [
@@ -64,15 +71,15 @@ async function main() {
       let result;
       
       if (name.startsWith('campaign_')) {
-        result = await handleCampaignTool(name, args, API_KEY);
+        result = await handleCampaignTool(name, args, SMARTLEAD_API_KEY);
       } else if (name.startsWith('lead_')) {
-        result = await handleLeadTool(name, args, API_KEY);
+        result = await handleLeadTool(name, args, SMARTLEAD_API_KEY);
       } else if (name.startsWith('analytics_')) {
-        result = await handleAnalyticsTool(name, args, API_KEY);
+        result = await handleAnalyticsTool(name, args, SMARTLEAD_API_KEY);
       } else if (name.startsWith('reply_')) {
-        result = await handleReplyTool(name, args, API_KEY);
+        result = await handleReplyTool(name, args, SMARTLEAD_API_KEY);
       } else if (name.startsWith('webhook_')) {
-        result = await handleWebhookTool(name, args, API_KEY);
+        result = await handleWebhookTool(name, args, SMARTLEAD_API_KEY);
       } else {
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
       }
