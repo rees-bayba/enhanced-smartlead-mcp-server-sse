@@ -17,11 +17,8 @@ RUN npm run build
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
 
-# Install supergateway globally
-RUN npm install -g supergateway
-
 # Expose the port
 EXPOSE 8080
 
-# Use the start script which runs Supergateway
+# Start the server directly
 CMD ["npm", "start"]
