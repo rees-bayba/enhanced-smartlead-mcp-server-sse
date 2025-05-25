@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -10,6 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import axios, { AxiosInstance } from 'axios';
 import dotenv from 'dotenv';
+import cors from 'cors';
 
 // Load environment variables
 dotenv.config();
@@ -26,6 +28,7 @@ function getApiKey(): string {
 
 const SMARTLEAD_API_KEY = getApiKey();
 const API_BASE = 'https://server.smartlead.ai/api/v1';
+const PORT = process.env.PORT || 8080;
 
 // SmartLead API Client
 class SmartLeadClient {
@@ -76,7 +79,7 @@ class SmartLeadClient {
   }
 }
 
-// Define all tools in one place
+// Define all tools
 const ALL_TOOLS: Tool[] = [
   // Campaign Management Tools
   {
@@ -379,7 +382,7 @@ const ALL_TOOLS: Tool[] = [
   }
 ];
 
-// Single tool handler function
+// Tool handler
 async function handleToolCall(name: string, args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
   const client = new SmartLeadClient(SMARTLEAD_API_KEY);
   
@@ -645,58 +648,90 @@ async function handleToolCall(name: string, args: any): Promise<{ content: Array
   }
 }
 
-// Main server function
-async function main() {
-  const server = new Server(
-    {
+// Create Express app
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', service: 'smartlead-mcp-server' });
+});
+
+// Main SSE endpoint for MCP
+app.get('/', async (req, res) => {
+  // Check if this is an SSE request
+  if (req.headers.accept === 'text/event-stream') {
+    console.log('[SSE] New connection request');
+    
+    // Create MCP server
+    const server = new Server(
+      {
+        name: 'smartlead-mcp-server',
+        version: '1.0.0',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    );
+
+    // Set up handlers
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
+      console.log(`[MCP] Listing ${ALL_TOOLS.length} tools`);
+      return { tools: ALL_TOOLS };
+    });
+
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+      console.log(`[MCP] Executing tool: ${name}`);
+
+      try {
+        const result = await handleToolCall(name, args);
+        return result;
+      } catch (error) {
+        console.error(`[MCP] Tool execution error:`, error);
+        
+        if (error instanceof McpError) {
+          throw error;
+        }
+        
+        throw new McpError(
+          ErrorCode.InternalError,
+          `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+    });
+
+    // Create SSE transport
+    const transport = new SSEServerTransport(req, res);
+    
+    // Connect server to transport
+    await server.connect(transport);
+    console.log('[MCP] Server connected via SSE');
+    
+    // Handle connection close
+    req.on('close', () => {
+      console.log('[SSE] Client disconnected');
+    });
+  } else {
+    // Regular HTTP request - return server info
+    res.json({
       name: 'smartlead-mcp-server',
       version: '1.0.0',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
-
-  // Handle list tools request
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    console.error(`[MCP] Listing ${ALL_TOOLS.length} tools`);
-    return { tools: ALL_TOOLS };
-  });
-
-  // Handle tool execution
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    console.error(`[MCP] Executing tool: ${name}`);
-
-    try {
-      const result = await handleToolCall(name, args);
-      return result;
-    } catch (error) {
-      console.error(`[MCP] Tool execution error:`, error);
-      
-      if (error instanceof McpError) {
-        throw error;
+      description: 'Enhanced SmartLead MCP Server with Analytics and Webhooks',
+      mcp: {
+        endpoint: '/',
+        transport: 'sse'
       }
-      
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
-    }
-  });
+    });
+  }
+});
 
-  // Create stdio transport
-  const transport = new StdioServerTransport();
-  
-  // Start the server
-  await server.connect(transport);
-  console.error('SmartLead MCP Server running on stdio');
-}
-
-// Run the server
-main().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
+// Start server
+app.listen(PORT, () => {
+  console.log(`SmartLead MCP Server running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`MCP SSE endpoint: http://localhost:${PORT}/`);
 });
