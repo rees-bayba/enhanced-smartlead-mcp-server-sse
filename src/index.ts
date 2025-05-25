@@ -1,20 +1,11 @@
 #!/usr/bin/env node
-import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  ErrorCode,
-  McpError,
-  Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import axios, { AxiosInstance } from 'axios';
-import dotenv from 'dotenv';
-import cors from 'cors';
-
-// Load environment variables
-dotenv.config();
+import axios from 'axios';
 
 // Validate and get API key
 function getApiKey(): string {
@@ -26,712 +17,464 @@ function getApiKey(): string {
   return apiKey;
 }
 
+// Get the API key once
 const SMARTLEAD_API_KEY = getApiKey();
-const API_BASE = 'https://server.smartlead.ai/api/v1';
-const PORT = process.env.PORT || 8080;
 
 // SmartLead API Client
 class SmartLeadClient {
-  private client: AxiosInstance;
   private apiKey: string;
+  private baseUrl = 'https://server.smartlead.ai/api/v1';
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.client = axios.create({
-      baseURL: API_BASE,
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
   }
 
-  async request(method: string, endpoint: string, data?: any, params?: any) {
+  private async request(endpoint: string, method: string = 'GET', data?: any) {
+    const url = `${this.baseUrl}${endpoint}`;
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+
     try {
-      const response = await this.client.request({
+      const response = await axios({
         method,
-        url: endpoint,
-        data,
-        params: {
-          api_key: this.apiKey,
-          ...params,
-        },
+        url,
+        headers,
+        params: method === 'GET' ? { ...data, api_key: this.apiKey } : { api_key: this.apiKey },
+        data: method !== 'GET' ? data : undefined,
       });
       return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`SmartLead API Error: ${error.response?.data?.message || error.message}`);
-      }
-      throw error;
+    } catch (error: any) {
+      throw new Error(`SmartLead API error: ${error.response?.data?.message || error.message}`);
     }
   }
 
-  get(endpoint: string, params?: any) {
-    return this.request('GET', endpoint, undefined, params);
+  // Campaign endpoints
+  async listCampaigns() {
+    return this.request('/campaigns');
   }
 
-  post(endpoint: string, data?: any, params?: any) {
-    return this.request('POST', endpoint, data, params);
+  async getCampaign(campaignId: string) {
+    return this.request(`/campaigns/${campaignId}`);
   }
 
-  delete(endpoint: string, params?: any) {
-    return this.request('DELETE', endpoint, undefined, params);
+  async createCampaign(data: any) {
+    return this.request('/campaigns', 'POST', data);
+  }
+
+  async updateCampaign(campaignId: string, data: any) {
+    return this.request(`/campaigns/${campaignId}`, 'PUT', data);
+  }
+
+  async deleteCampaign(campaignId: string) {
+    return this.request(`/campaigns/${campaignId}`, 'DELETE');
+  }
+
+  async getCampaignSchedules(campaignId: string) {
+    return this.request(`/campaigns/${campaignId}/schedules`);
+  }
+
+  // Lead endpoints
+  async addLeadsToCampaign(campaignId: string, leads: any[]) {
+    return this.request(`/campaigns/${campaignId}/leads`, 'POST', { leads });
+  }
+
+  async getLeadsFromCampaign(campaignId: string, offset: number = 0, limit: number = 100) {
+    return this.request(`/campaigns/${campaignId}/leads`, 'GET', { offset, limit });
+  }
+
+  async updateLead(campaignId: string, email: string, data: any) {
+    return this.request(`/campaigns/${campaignId}/leads/${email}`, 'PUT', data);
+  }
+
+  async deleteLead(campaignId: string, email: string) {
+    return this.request(`/campaigns/${campaignId}/leads/${email}`, 'DELETE');
+  }
+
+  // Analytics endpoints
+  async getCampaignAnalytics(campaignId: string) {
+    return this.request(`/campaigns/${campaignId}/analytics`);
+  }
+
+  async getEmailAccountAnalytics() {
+    return this.request('/analytics/email-accounts');
+  }
+
+  async getMasterInboxStats() {
+    return this.request('/analytics/master-inbox');
+  }
+
+  // Reply endpoints
+  async sendReply(data: any) {
+    return this.request('/replies', 'POST', data);
+  }
+
+  async getConversations(campaignId?: string) {
+    const params = campaignId ? { campaign_id: campaignId } : {};
+    return this.request('/conversations', 'GET', params);
+  }
+
+  // Webhook endpoints
+  async listWebhooks() {
+    return this.request('/webhooks');
+  }
+
+  async createWebhook(data: any) {
+    return this.request('/webhooks', 'POST', data);
+  }
+
+  async deleteWebhook(webhookId: string) {
+    return this.request(`/webhooks/${webhookId}`, 'DELETE');
   }
 }
 
-// Define all tools
-const ALL_TOOLS: Tool[] = [
-  // Campaign Management Tools
+// Create server with proper name
+const server = new Server(
   {
-    name: "campaign_list",
-    description: "List all campaigns with their current status and statistics",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        offset: {
-          type: "number",
-          description: "Number of records to skip",
-          default: 0
-        },
-        limit: {
-          type: "number",
-          description: "Number of records to return",
-          default: 100
-        }
-      }
-    }
+    name: 'smartlead-mcp-server',
+    vendor: 'smartlead',
+    version: '1.0.0',
+    description: 'MCP server for SmartLead campaign management and automation',
   },
   {
-    name: "campaign_get",
-    description: "Get detailed information about a specific campaign",
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// Define tool schemas
+const toolSchemas = {
+  // Campaign tools
+  list_campaigns: {
+    description: 'List all campaigns',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
+      properties: {},
+    },
+  },
+  get_campaign: {
+    description: 'Get details of a specific campaign',
+    inputSchema: {
+      type: 'object',
       properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        }
+        campaign_id: { type: 'string', description: 'Campaign ID' },
       },
-      required: ["campaignId"]
-    }
+      required: ['campaign_id'],
+    },
   },
-  {
-    name: "campaign_status_update",
-    description: "Update campaign status (START, PAUSE, STOP, RESUME)",
+  create_campaign: {
+    description: 'Create a new campaign',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        status: {
-          type: "string",
-          description: "New status: START, PAUSE, STOP, or RESUME",
-          enum: ["START", "PAUSE", "STOP", "RESUME"]
-        }
+        name: { type: 'string', description: 'Campaign name' },
+        from_name: { type: 'string', description: 'Sender name' },
+        from_email: { type: 'string', description: 'Sender email' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (HTML)' },
+        schedule: { type: 'object', description: 'Campaign schedule settings' },
       },
-      required: ["campaignId", "status"]
-    }
+      required: ['name', 'from_name', 'from_email', 'subject', 'body'],
+    },
   },
-  
-  // Lead Management Tools
-  {
-    name: "lead_list_by_campaign",
-    description: "List all leads in a specific campaign",
+  update_campaign: {
+    description: 'Update an existing campaign',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        offset: {
-          type: "number",
-          description: "Number of records to skip",
-          default: 0
-        },
-        limit: {
-          type: "number",
-          description: "Number of records to return",
-          default: 100
-        }
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        name: { type: 'string', description: 'Campaign name' },
+        from_name: { type: 'string', description: 'Sender name' },
+        from_email: { type: 'string', description: 'Sender email' },
+        subject: { type: 'string', description: 'Email subject' },
+        body: { type: 'string', description: 'Email body (HTML)' },
       },
-      required: ["campaignId"]
-    }
+      required: ['campaign_id'],
+    },
   },
-  {
-    name: "lead_search_by_email",
-    description: "Search for a lead by email address",
+  delete_campaign: {
+    description: 'Delete a campaign',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        email: {
-          type: "string",
-          description: "Email address to search for"
-        }
+        campaign_id: { type: 'string', description: 'Campaign ID' },
       },
-      required: ["email"]
-    }
+      required: ['campaign_id'],
+    },
   },
-  {
-    name: "lead_update_category",
-    description: "Update lead category (interested, not_interested, etc.)",
+  get_campaign_schedules: {
+    description: 'Get campaign schedules',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        email: {
-          type: "string",
-          description: "Lead's email address"
-        },
-        campaignId: {
-          type: "number",
-          description: "Campaign ID"
-        },
-        leadCategory: {
-          type: "string",
-          description: "New category",
-          enum: ["interested", "not_interested", "maybe_later", "meeting_booked", "meeting_completed"]
-        }
+        campaign_id: { type: 'string', description: 'Campaign ID' },
       },
-      required: ["email", "campaignId", "leadCategory"]
-    }
+      required: ['campaign_id'],
+    },
   },
-  {
-    name: "lead_add_to_blocklist",
-    description: "Add a lead to the blocklist",
+  // Lead tools
+  add_leads_to_campaign: {
+    description: 'Add leads to a campaign',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        emails: {
-          type: "array",
-          items: { type: "string" },
-          description: "Array of email addresses to block"
-        }
-      },
-      required: ["emails"]
-    }
-  },
-  
-  // Analytics Tools
-  {
-    name: "analytics_campaign_overview",
-    description: "Get campaign statistics including sent, opened, clicked, replied counts",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        }
-      },
-      required: ["campaignId"]
-    }
-  },
-  {
-    name: "analytics_campaign_by_date",
-    description: "Get campaign analytics for a specific date range",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        startDate: {
-          type: "string",
-          description: "Start date (YYYY-MM-DD)"
-        },
-        endDate: {
-          type: "string",
-          description: "End date (YYYY-MM-DD)"
-        }
-      },
-      required: ["campaignId", "startDate", "endDate"]
-    }
-  },
-  {
-    name: "analytics_sequence_performance",
-    description: "Get performance metrics for each sequence step",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        }
-      },
-      required: ["campaignId"]
-    }
-  },
-  
-  // Reply Management Tools
-  {
-    name: "reply_get_all",
-    description: "Get all replies for a campaign with full message content",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        offset: {
-          type: "number",
-          description: "Number of records to skip",
-          default: 0
-        },
-        limit: {
-          type: "number",
-          description: "Number of records to return",
-          default: 100
-        }
-      },
-      required: ["campaignId"]
-    }
-  },
-  {
-    name: "reply_get_message_history",
-    description: "Get complete message history for a specific lead",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        leadId: {
-          type: "number",
-          description: "The lead ID"
-        }
-      },
-      required: ["campaignId", "leadId"]
-    }
-  },
-  {
-    name: "reply_send",
-    description: "Send a reply to a lead",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        campaignId: {
-          type: "number",
-          description: "The campaign ID"
-        },
-        leadId: {
-          type: "number",
-          description: "The lead ID"
-        },
-        message: {
-          type: "string",
-          description: "Reply message content"
-        }
-      },
-      required: ["campaignId", "leadId", "message"]
-    }
-  },
-  
-  // Webhook Tools
-  {
-    name: "webhook_create",
-    description: "Create a webhook for real-time event notifications",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        url: {
-          type: "string",
-          description: "Webhook endpoint URL"
-        },
-        events: {
-          type: "array",
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        leads: {
+          type: 'array',
+          description: 'Array of lead objects',
           items: {
-            type: "string",
-            enum: ["EMAIL_SENT", "EMAIL_OPENED", "EMAIL_CLICKED", "EMAIL_REPLIED", "LEAD_CATEGORY_UPDATED"]
+            type: 'object',
+            properties: {
+              email: { type: 'string' },
+              first_name: { type: 'string' },
+              last_name: { type: 'string' },
+              company: { type: 'string' },
+              custom_fields: { type: 'object' },
+            },
+            required: ['email'],
           },
-          description: "Events to subscribe to"
         },
-        campaignId: {
-          type: "number",
-          description: "Optional: Specific campaign ID to monitor"
-        }
       },
-      required: ["url", "events"]
-    }
+      required: ['campaign_id', 'leads'],
+    },
   },
-  {
-    name: "webhook_list",
-    description: "List all active webhooks",
+  get_leads_from_campaign: {
+    description: 'Get leads from a campaign',
     inputSchema: {
-      type: "object" as const,
-      properties: {}
-    }
-  },
-  {
-    name: "webhook_delete",
-    description: "Delete a webhook",
-    inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        webhookId: {
-          type: "string",
-          description: "Webhook ID to delete"
-        }
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        offset: { type: 'number', description: 'Offset for pagination' },
+        limit: { type: 'number', description: 'Number of leads to retrieve' },
       },
-      required: ["webhookId"]
-    }
-  }
-];
+      required: ['campaign_id'],
+    },
+  },
+  update_lead: {
+    description: 'Update a lead in a campaign',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        email: { type: 'string', description: 'Lead email' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        company: { type: 'string' },
+        custom_fields: { type: 'object' },
+      },
+      required: ['campaign_id', 'email'],
+    },
+  },
+  delete_lead: {
+    description: 'Delete a lead from a campaign',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        email: { type: 'string', description: 'Lead email' },
+      },
+      required: ['campaign_id', 'email'],
+    },
+  },
+  // Analytics tools
+  get_campaign_analytics: {
+    description: 'Get analytics for a specific campaign',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+      },
+      required: ['campaign_id'],
+    },
+  },
+  get_email_account_analytics: {
+    description: 'Get analytics for all email accounts',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  get_master_inbox_stats: {
+    description: 'Get master inbox statistics',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  // Reply tools
+  send_reply: {
+    description: 'Send a reply to a lead',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID' },
+        lead_email: { type: 'string', description: 'Lead email' },
+        message: { type: 'string', description: 'Reply message' },
+      },
+      required: ['campaign_id', 'lead_email', 'message'],
+    },
+  },
+  get_conversations: {
+    description: 'Get conversations, optionally filtered by campaign',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        campaign_id: { type: 'string', description: 'Campaign ID (optional)' },
+      },
+    },
+  },
+  // Webhook tools
+  list_webhooks: {
+    description: 'List all webhooks',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  create_webhook: {
+    description: 'Create a new webhook',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Webhook URL' },
+        events: {
+          type: 'array',
+          description: 'Events to subscribe to',
+          items: { type: 'string' },
+        },
+      },
+      required: ['url', 'events'],
+    },
+  },
+  delete_webhook: {
+    description: 'Delete a webhook',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        webhook_id: { type: 'string', description: 'Webhook ID' },
+      },
+      required: ['webhook_id'],
+    },
+  },
+} as const;
 
-// Tool handler
-async function handleToolCall(name: string, args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
+// Handle list tools request
+server.setRequestHandler(ListToolsRequestSchema, async () => {
+  return {
+    tools: Object.entries(toolSchemas).map(([name, schema]) => ({
+      name,
+      description: schema.description,
+      inputSchema: schema.inputSchema,
+    })),
+  };
+});
+
+// Handle tool execution
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const client = new SmartLeadClient(SMARTLEAD_API_KEY);
-  
-  switch (name) {
-    // Campaign tools
-    case 'campaign_list': {
-      const data = await client.get('/campaigns', {
-        offset: args?.offset || 0,
-        limit: args?.limit || 100
-      });
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
+  const { name, arguments: args } = request.params;
+
+  try {
+    let result;
     
-    case 'campaign_get': {
-      if (!args?.campaignId) throw new Error('campaignId is required');
-      const data = await client.get(`/campaigns/${args.campaignId}`);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'campaign_status_update': {
-      if (!args?.campaignId || !args?.status) throw new Error('campaignId and status are required');
-      const endpoint = args.status === 'START' 
-        ? `/campaigns/${args.campaignId}/start`
-        : args.status === 'PAUSE'
-        ? `/campaigns/${args.campaignId}/pause`
-        : args.status === 'STOP'
-        ? `/campaigns/${args.campaignId}/stop`
-        : `/campaigns/${args.campaignId}/resume`;
+    switch (name) {
+      // Campaign tools
+      case 'list_campaigns':
+        result = await client.listCampaigns();
+        break;
+      case 'get_campaign':
+        result = await client.getCampaign(args.campaign_id);
+        break;
+      case 'create_campaign':
+        result = await client.createCampaign(args);
+        break;
+      case 'update_campaign':
+        result = await client.updateCampaign(args.campaign_id, args);
+        break;
+      case 'delete_campaign':
+        result = await client.deleteCampaign(args.campaign_id);
+        break;
+      case 'get_campaign_schedules':
+        result = await client.getCampaignSchedules(args.campaign_id);
+        break;
       
-      const data = await client.post(endpoint);
-      return {
-        content: [{
-          type: "text",
-          text: `Campaign ${args.campaignId} status updated to ${args.status}. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    // Lead tools
-    case 'lead_list_by_campaign': {
-      if (!args?.campaignId) throw new Error('campaignId is required');
-      const data = await client.get(`/campaigns/${args.campaignId}/leads`, {
-        offset: args?.offset || 0,
-        limit: args?.limit || 100
-      });
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'lead_search_by_email': {
-      if (!args?.email) throw new Error('email is required');
-      const data = await client.get('/leads/search', {
-        email: args.email
-      });
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'lead_update_category': {
-      if (!args?.email || !args?.campaignId || !args?.leadCategory) {
-        throw new Error('email, campaignId, and leadCategory are required');
-      }
-      const data = await client.post('/leads/category/update', {
-        email: args.email,
-        campaignId: args.campaignId,
-        leadCategory: args.leadCategory
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Lead category updated successfully. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    case 'lead_add_to_blocklist': {
-      if (!args?.emails || !Array.isArray(args.emails)) {
-        throw new Error('emails array is required');
-      }
-      const data = await client.post('/leads/block-list', {
-        emails: args.emails
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Added ${args.emails.length} email(s) to blocklist. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    // Analytics tools
-    case 'analytics_campaign_overview': {
-      if (!args?.campaignId) throw new Error('campaignId is required');
-      const data = await client.get(`/campaigns/${args.campaignId}/analytics`);
+      // Lead tools
+      case 'add_leads_to_campaign':
+        result = await client.addLeadsToCampaign(args.campaign_id, args.leads);
+        break;
+      case 'get_leads_from_campaign':
+        result = await client.getLeadsFromCampaign(args.campaign_id, args.offset, args.limit);
+        break;
+      case 'update_lead':
+        result = await client.updateLead(args.campaign_id, args.email, args);
+        break;
+      case 'delete_lead':
+        result = await client.deleteLead(args.campaign_id, args.email);
+        break;
       
-      const sentCount = data.sent_count || 0;
-      const openCount = data.open_count || 0;
-      const replyCount = data.reply_count || 0;
-      const clickCount = data.click_count || 0;
+      // Analytics tools
+      case 'get_campaign_analytics':
+        result = await client.getCampaignAnalytics(args.campaign_id);
+        break;
+      case 'get_email_account_analytics':
+        result = await client.getEmailAccountAnalytics();
+        break;
+      case 'get_master_inbox_stats':
+        result = await client.getMasterInboxStats();
+        break;
       
-      const enhanced = {
-        ...data,
-        calculated_metrics: {
-          open_rate: sentCount > 0 ? `${(openCount / sentCount * 100).toFixed(2)}%` : '0%',
-          reply_rate: sentCount > 0 ? `${(replyCount / sentCount * 100).toFixed(2)}%` : '0%',
-          click_rate: sentCount > 0 ? `${(clickCount / sentCount * 100).toFixed(2)}%` : '0%'
-        }
-      };
+      // Reply tools
+      case 'send_reply':
+        result = await client.sendReply(args);
+        break;
+      case 'get_conversations':
+        result = await client.getConversations(args.campaign_id);
+        break;
       
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(enhanced, null, 2)
-        }]
-      };
-    }
-    
-    case 'analytics_campaign_by_date': {
-      if (!args?.campaignId || !args?.startDate || !args?.endDate) {
-        throw new Error('campaignId, startDate, and endDate are required');
-      }
-      const data = await client.get(`/campaigns/${args.campaignId}/analytics-by-date`, {
-        start_date: args.startDate,
-        end_date: args.endDate
-      });
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'analytics_sequence_performance': {
-      if (!args?.campaignId) throw new Error('campaignId is required');
-      const data = await client.get(`/campaigns/${args.campaignId}/sequence-analytics`);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    // Reply tools
-    case 'reply_get_all': {
-      if (!args?.campaignId) throw new Error('campaignId is required');
-      const data = await client.get(`/campaigns/${args.campaignId}/leads`, {
-        offset: args?.offset || 0,
-        limit: args?.limit || 100,
-        lead_status: 'REPLIED'
-      });
+      // Webhook tools
+      case 'list_webhooks':
+        result = await client.listWebhooks();
+        break;
+      case 'create_webhook':
+        result = await client.createWebhook(args);
+        break;
+      case 'delete_webhook':
+        result = await client.deleteWebhook(args.webhook_id);
+        break;
       
-      const replies = data.data?.filter((lead: any) => lead.last_reply) || [];
-      const formattedReplies = replies.map((lead: any) => ({
-        lead_email: lead.email,
-        lead_name: `${lead.first_name || ''} ${lead.last_name || ''}`.trim(),
-        company: lead.company_name,
-        reply_date: lead.last_reply_time,
-        reply_content: lead.last_reply,
-        lead_category: lead.lead_category,
-        lead_id: lead.id
-      }));
-      
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            total_replies: data.total_replied || replies.length,
-            replies: formattedReplies
-          }, null, 2)
-        }]
-      };
+      default:
+        throw new Error(`Unknown tool: ${name}`);
     }
-    
-    case 'reply_get_message_history': {
-      if (!args?.campaignId || !args?.leadId) {
-        throw new Error('campaignId and leadId are required');
-      }
-      const data = await client.get(`/campaigns/${args.campaignId}/leads/${args.leadId}/message-history`);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'reply_send': {
-      if (!args?.campaignId || !args?.leadId || !args?.message) {
-        throw new Error('campaignId, leadId, and message are required');
-      }
-      const data = await client.post(`/campaigns/${args.campaignId}/leads/${args.leadId}/reply`, {
-        message: args.message
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Reply sent successfully. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    // Webhook tools
-    case 'webhook_create': {
-      if (!args?.url || !args?.events || !Array.isArray(args.events)) {
-        throw new Error('url and events array are required');
-      }
-      const data = await client.post('/webhooks', {
-        url: args.url,
-        events: args.events,
-        campaignId: args.campaignId
-      });
-      return {
-        content: [{
-          type: "text",
-          text: `Webhook created successfully. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    case 'webhook_list': {
-      const data = await client.get('/webhooks');
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(data, null, 2)
-        }]
-      };
-    }
-    
-    case 'webhook_delete': {
-      if (!args?.webhookId) throw new Error('webhookId is required');
-      const data = await client.delete(`/webhooks/${args.webhookId}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Webhook deleted successfully. Response: ${JSON.stringify(data, null, 2)}`
-        }]
-      };
-    }
-    
-    default:
-      throw new Error(`Unknown tool: ${name}`);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  } catch (error: any) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Error: ${error.message}`,
+        },
+      ],
+    };
   }
+});
+
+// Start the server
+async function main() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('SmartLead MCP Server running on stdio');
 }
 
-// Create Express app
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', service: 'smartlead-mcp-server' });
-});
-
-// Main SSE endpoint for MCP
-app.get('/', async (req, res) => {
-  // Check if this is an SSE request
-  if (req.headers.accept === 'text/event-stream') {
-    console.log('[SSE] New connection request');
-    
-    // Create MCP server
-    const server = new Server(
-      {
-        name: 'smartlead-mcp-server',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
-
-    // Set up handlers
-    server.setRequestHandler(ListToolsRequestSchema, async () => {
-      console.log(`[MCP] Listing ${ALL_TOOLS.length} tools`);
-      return { tools: ALL_TOOLS };
-    });
-
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
-      console.log(`[MCP] Executing tool: ${name}`);
-
-      try {
-        const result = await handleToolCall(name, args);
-        return result;
-      } catch (error) {
-        console.error(`[MCP] Tool execution error:`, error);
-        
-        if (error instanceof McpError) {
-          throw error;
-        }
-        
-        throw new McpError(
-          ErrorCode.InternalError,
-          `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
-      }
-    });
-
-    // Create SSE transport
-    const transport = new SSEServerTransport(req, res);
-    
-    // Connect server to transport
-    await server.connect(transport);
-    console.log('[MCP] Server connected via SSE');
-    
-    // Handle connection close
-    req.on('close', () => {
-      console.log('[SSE] Client disconnected');
-    });
-  } else {
-    // Regular HTTP request - return server info
-    res.json({
-      name: 'smartlead-mcp-server',
-      version: '1.0.0',
-      description: 'Enhanced SmartLead MCP Server with Analytics and Webhooks',
-      mcp: {
-        endpoint: '/',
-        transport: 'sse'
-      }
-    });
-  }
-});
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`SmartLead MCP Server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`MCP SSE endpoint: http://localhost:${PORT}/`);
+main().catch((error) => {
+  console.error('Server error:', error);
+  process.exit(1);
 });
