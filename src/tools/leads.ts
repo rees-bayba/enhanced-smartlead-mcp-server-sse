@@ -1,11 +1,12 @@
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { SmartLeadClient } from '../utils/smartlead-client.js';
 
-export const leadTools = [
+export const leadTools: Tool[] = [
   {
     name: "lead_list_by_campaign",
     description: "List all leads in a specific campaign",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         campaignId: {
           type: "number",
@@ -29,7 +30,7 @@ export const leadTools = [
     name: "lead_search_by_email",
     description: "Search for a lead by email address",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         email: {
           type: "string",
@@ -43,7 +44,7 @@ export const leadTools = [
     name: "lead_update_category",
     description: "Update lead category (interested, not_interested, etc.)",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         email: {
           type: "string",
@@ -66,7 +67,7 @@ export const leadTools = [
     name: "lead_add_to_blocklist",
     description: "Add a lead to the blocklist",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         emails: {
           type: "array",
@@ -84,31 +85,40 @@ export async function handleLeadTool(name: string, args: any, apiKey: string) {
 
   switch (name) {
     case 'lead_list_by_campaign': {
+      if (!args?.campaignId) {
+        throw new Error('campaignId is required');
+      }
       const data = await client.get(`/campaigns/${args.campaignId}/leads`, {
-        offset: args.offset || 0,
-        limit: args.limit || 100
+        offset: args?.offset || 0,
+        limit: args?.limit || 100
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify(data, null, 2)
         }]
       };
     }
 
     case 'lead_search_by_email': {
+      if (!args?.email) {
+        throw new Error('email is required');
+      }
       const data = await client.get('/leads/search', {
         email: args.email
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify(data, null, 2)
         }]
       };
     }
 
     case 'lead_update_category': {
+      if (!args?.email || !args?.campaignId || !args?.leadCategory) {
+        throw new Error('email, campaignId, and leadCategory are required');
+      }
       const data = await client.post('/leads/category/update', {
         email: args.email,
         campaignId: args.campaignId,
@@ -116,19 +126,22 @@ export async function handleLeadTool(name: string, args: any, apiKey: string) {
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: `Lead category updated successfully. Response: ${JSON.stringify(data, null, 2)}`
         }]
       };
     }
 
     case 'lead_add_to_blocklist': {
+      if (!args?.emails || !Array.isArray(args.emails)) {
+        throw new Error('emails array is required');
+      }
       const data = await client.post('/leads/block-list', {
         emails: args.emails
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: `Added ${args.emails.length} email(s) to blocklist. Response: ${JSON.stringify(data, null, 2)}`
         }]
       };
