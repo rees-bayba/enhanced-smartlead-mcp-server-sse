@@ -378,44 +378,52 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     let result;
     
+    // Type guard to ensure args is defined
+    if (!args) {
+      throw new Error('No arguments provided');
+    }
+    
+    // Cast args to any to bypass TypeScript strict checking
+    const params = args as any;
+    
     switch (name) {
       // Campaign tools
       case 'list_campaigns':
         result = await client.listCampaigns();
         break;
       case 'get_campaign':
-        result = await client.getCampaign(args.campaign_id);
+        result = await client.getCampaign(params.campaign_id);
         break;
       case 'create_campaign':
-        result = await client.createCampaign(args);
+        result = await client.createCampaign(params);
         break;
       case 'update_campaign':
-        result = await client.updateCampaign(args.campaign_id, args);
+        result = await client.updateCampaign(params.campaign_id, params);
         break;
       case 'delete_campaign':
-        result = await client.deleteCampaign(args.campaign_id);
+        result = await client.deleteCampaign(params.campaign_id);
         break;
       case 'get_campaign_schedules':
-        result = await client.getCampaignSchedules(args.campaign_id);
+        result = await client.getCampaignSchedules(params.campaign_id);
         break;
       
       // Lead tools
       case 'add_leads_to_campaign':
-        result = await client.addLeadsToCampaign(args.campaign_id, args.leads);
+        result = await client.addLeadsToCampaign(params.campaign_id, params.leads);
         break;
       case 'get_leads_from_campaign':
-        result = await client.getLeadsFromCampaign(args.campaign_id, args.offset, args.limit);
+        result = await client.getLeadsFromCampaign(params.campaign_id, params.offset, params.limit);
         break;
       case 'update_lead':
-        result = await client.updateLead(args.campaign_id, args.email, args);
+        result = await client.updateLead(params.campaign_id, params.email, params);
         break;
       case 'delete_lead':
-        result = await client.deleteLead(args.campaign_id, args.email);
+        result = await client.deleteLead(params.campaign_id, params.email);
         break;
       
       // Analytics tools
       case 'get_campaign_analytics':
-        result = await client.getCampaignAnalytics(args.campaign_id);
+        result = await client.getCampaignAnalytics(params.campaign_id);
         break;
       case 'get_email_account_analytics':
         result = await client.getEmailAccountAnalytics();
@@ -426,10 +434,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       
       // Reply tools
       case 'send_reply':
-        result = await client.sendReply(args);
+        result = await client.sendReply(params);
         break;
       case 'get_conversations':
-        result = await client.getConversations(args.campaign_id);
+        result = await client.getConversations(params.campaign_id);
         break;
       
       // Webhook tools
@@ -437,10 +445,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await client.listWebhooks();
         break;
       case 'create_webhook':
-        result = await client.createWebhook(args);
+        result = await client.createWebhook(params);
         break;
       case 'delete_webhook':
-        result = await client.deleteWebhook(args.webhook_id);
+        result = await client.deleteWebhook(params.webhook_id);
         break;
       
       default:
