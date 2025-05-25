@@ -1,11 +1,12 @@
+import { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { SmartLeadClient } from '../utils/smartlead-client.js';
 
-export const webhookTools = [
+export const webhookTools: Tool[] = [
   {
     name: "webhook_create",
     description: "Create a webhook for real-time event notifications",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         url: {
           type: "string",
@@ -31,7 +32,7 @@ export const webhookTools = [
     name: "webhook_list",
     description: "List all active webhooks",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {}
     }
   },
@@ -39,7 +40,7 @@ export const webhookTools = [
     name: "webhook_delete",
     description: "Delete a webhook",
     inputSchema: {
-      type: "object",
+      type: "object" as const,
       properties: {
         webhookId: {
           type: "string",
@@ -56,6 +57,9 @@ export async function handleWebhookTool(name: string, args: any, apiKey: string)
 
   switch (name) {
     case 'webhook_create': {
+      if (!args?.url || !args?.events || !Array.isArray(args.events)) {
+        throw new Error('url and events array are required');
+      }
       const data = await client.post('/webhooks', {
         url: args.url,
         events: args.events,
@@ -63,7 +67,7 @@ export async function handleWebhookTool(name: string, args: any, apiKey: string)
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: `Webhook created successfully. Response: ${JSON.stringify(data, null, 2)}`
         }]
       };
@@ -73,17 +77,20 @@ export async function handleWebhookTool(name: string, args: any, apiKey: string)
       const data = await client.get('/webhooks');
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify(data, null, 2)
         }]
       };
     }
 
     case 'webhook_delete': {
+      if (!args?.webhookId) {
+        throw new Error('webhookId is required');
+      }
       const data = await client.delete(`/webhooks/${args.webhookId}`);
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: `Webhook deleted successfully. Response: ${JSON.stringify(data, null, 2)}`
         }]
       };
