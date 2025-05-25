@@ -1,10 +1,10 @@
 {
-  "name": "smartlead-mcp-server",
+  "name": "smartlead-mcp",
   "version": "1.0.0",
   "description": "MCP server for SmartLead campaign management integration",
   "type": "module",
   "bin": {
-    "smartlead-mcp-server": "dist/index.js"
+    "smartlead-mcp": "dist/index.js"
   },
   "files": [
     "dist"
