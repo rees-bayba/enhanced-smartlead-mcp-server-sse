@@ -131,14 +131,13 @@ class SmartLeadClient {
 // Create server with proper name
 const server = new Server(
   {
-    name: 'smartlead-mcp-server',
-    vendor: 'smartlead',
+    name: 'smartlead-mcp',
     version: '1.0.0',
-    description: 'MCP server for SmartLead campaign management and automation',
   },
   {
     capabilities: {
       tools: {},
+      logging: {},
     },
   }
 );
