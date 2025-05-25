@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "npx supergateway --command node build/index.js",
+    "start": "npx supergateway --stdio --port 8080 \"node build/index.js\"",
     "dev": "tsx src/index.ts",
     "start:direct": "node build/index.js"
   },
