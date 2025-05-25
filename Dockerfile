@@ -5,17 +5,23 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies (including dev dependencies for TypeScript)
+# Install all dependencies (including dev for TypeScript)
 RUN npm install
 
-# Copy the rest of the application
+# Copy source code
 COPY . .
 
 # Build the TypeScript code
 RUN npm run build
 
-# Remove dev dependencies after building
+# Remove dev dependencies to reduce image size
 RUN npm prune --production
 
-# Use Supergateway to wrap the stdio server
-CMD ["npx", "supergateway", "--command", "node", "build/index.js"]
+# Install supergateway globally
+RUN npm install -g supergateway
+
+# Expose the port
+EXPOSE 8080
+
+# Use the start script which runs Supergateway
+CMD ["npm", "start"]
