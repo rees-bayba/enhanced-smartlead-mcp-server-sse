@@ -1,6 +1,5 @@
-import { z } from 'zod';
-import { SmartLeadClient } from '../utils/smartlead-client.js';
 import { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { SmartLeadClient } from '../utils/smartlead-client.js';
 
 export const campaignTools: Tool[] = [
   {
@@ -63,28 +62,34 @@ export async function handleCampaignTool(name: string, args: any, apiKey: string
   switch (name) {
     case 'campaign_list': {
       const data = await client.get('/campaigns', {
-        offset: args.offset || 0,
-        limit: args.limit || 100
+        offset: args?.offset || 0,
+        limit: args?.limit || 100
       });
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify(data, null, 2)
         }]
       };
     }
 
     case 'campaign_get': {
+      if (!args?.campaignId) {
+        throw new Error('campaignId is required');
+      }
       const data = await client.get(`/campaigns/${args.campaignId}`);
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify(data, null, 2)
         }]
       };
     }
 
     case 'campaign_status_update': {
+      if (!args?.campaignId || !args?.status) {
+        throw new Error('campaignId and status are required');
+      }
       const endpoint = args.status === 'START' 
         ? `/campaigns/${args.campaignId}/start`
         : args.status === 'PAUSE'
@@ -96,7 +101,7 @@ export async function handleCampaignTool(name: string, args: any, apiKey: string
       const data = await client.post(endpoint);
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: `Campaign ${args.campaignId} status updated to ${args.status}. Response: ${JSON.stringify(data, null, 2)}`
         }]
       };
