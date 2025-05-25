@@ -1,186 +1,107 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
-} from "@modelcontextprotocol/sdk/types.js";
-import axios from 'axios';
+  ErrorCode,
+  McpError,
+} from '@modelcontextprotocol/sdk/types.js';
 import dotenv from 'dotenv';
 
+// Import tools
+import { campaignTools, handleCampaignTool } from './tools/campaigns.js';
+import { leadTools, handleLeadTool } from './tools/leads.js';
+import { analyticsTools, handleAnalyticsTool } from './tools/analytics.js';
+import { replyTools, handleReplyTool } from './tools/replies.js';
+import { webhookTools, handleWebhookTool } from './tools/webhooks.js';
+
+// Load environment variables
 dotenv.config();
 
-// Get API key
-const SMARTLEAD_API_KEY = process.env.SMARTLEAD_API_KEY;
-if (!SMARTLEAD_API_KEY) {
-  console.error('Error: SMARTLEAD_API_KEY environment variable is required');
+const API_KEY = process.env.SMARTLEAD_API_KEY;
+if (!API_KEY) {
+  console.error('SMARTLEAD_API_KEY environment variable is required');
   process.exit(1);
 }
 
-// API client setup
-const apiClient = axios.create({
-  baseURL: 'https://server.smartlead.ai/api/v1',
-  params: {
-    api_key: SMARTLEAD_API_KEY,
-  },
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+// Combine all tools
+const ALL_TOOLS = [
+  ...campaignTools,
+  ...leadTools,
+  ...analyticsTools,
+  ...replyTools,
+  ...webhookTools
+];
 
-// Define tools
-const CAMPAIGN_LIST_TOOL: Tool = {
-  name: 'smartlead_list_campaigns',
-  description: 'List all campaigns with optional filtering.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      status: {
-        type: 'string',
-        enum: ['active', 'paused', 'completed', 'all'],
-        description: 'Filter campaigns by status',
-      },
-      limit: {
-        type: 'number',
-        description: 'Maximum number of campaigns to return',
-      },
-      offset: {
-        type: 'number',
-        description: 'Offset for pagination',
-      },
+// Main server function
+async function main() {
+  const server = new Server(
+    {
+      name: 'smartlead-mcp-server',
+      version: '1.0.0',
     },
-  },
-};
-
-const GET_CAMPAIGN_TOOL: Tool = {
-  name: 'smartlead_get_campaign',
-  description: 'Get details of a specific campaign by ID.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      campaign_id: {
-        type: 'number',
-        description: 'ID of the campaign to retrieve',
+    {
+      capabilities: {
+        tools: {},
       },
-    },
-    required: ['campaign_id'],
-  },
-};
-
-const GET_CAMPAIGN_ANALYTICS_TOOL: Tool = {
-  name: 'smartlead_get_campaign_analytics',
-  description: 'Get analytics for a specific campaign.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      campaign_id: {
-        type: 'number',
-        description: 'ID of the campaign',
-      },
-    },
-    required: ['campaign_id'],
-  },
-};
-
-// Create server
-const server = new Server(
-  {
-    name: 'smartlead-mcp',
-    version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
-
-// Setup handlers
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      CAMPAIGN_LIST_TOOL,
-      GET_CAMPAIGN_TOOL,
-      GET_CAMPAIGN_ANALYTICS_TOOL,
-    ],
-  };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  try {
-    switch (name) {
-      case 'smartlead_list_campaigns': {
-        const response = await apiClient.get('/campaigns', { 
-          params: args || {} 
-        });
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(response.data, null, 2),
-          }],
-        };
-      }
-
-      case 'smartlead_get_campaign': {
-        if (!args || typeof args.campaign_id !== 'number') {
-          throw new Error('campaign_id is required and must be a number');
-        }
-        const response = await apiClient.get(`/campaigns/${args.campaign_id}`);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(response.data, null, 2),
-          }],
-        };
-      }
-
-      case 'smartlead_get_campaign_analytics': {
-        if (!args || typeof args.campaign_id !== 'number') {
-          throw new Error('campaign_id is required and must be a number');
-        }
-        const response = await apiClient.get(
-          `/campaigns/${args.campaign_id}/analytics`
-        );
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(response.data, null, 2),
-          }],
-        };
-      }
-
-      default:
-        return {
-          content: [{
-            type: 'text',
-            text: `Unknown tool: ${name}`,
-          }],
-          isError: true,
-        };
     }
-  } catch (error) {
-    const errorMessage = axios.isAxiosError(error)
-      ? `API Error: ${error.response?.data?.message || error.message}`
-      : `Error: ${error instanceof Error ? error.message : String(error)}`;
+  );
 
-    return {
-      content: [{ type: 'text', text: errorMessage }],
-      isError: true,
-    };
-  }
-});
+  // Handle list tools request
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    console.error(`[MCP] Listing ${ALL_TOOLS.length} tools`);
+    return { tools: ALL_TOOLS };
+  });
 
-// Run server
-async function runServer() {
+  // Handle tool execution
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    console.error(`[MCP] Executing tool: ${name}`);
+
+    try {
+      // Route to appropriate handler based on tool prefix
+      let result;
+      
+      if (name.startsWith('campaign_')) {
+        result = await handleCampaignTool(name, args, API_KEY);
+      } else if (name.startsWith('lead_')) {
+        result = await handleLeadTool(name, args, API_KEY);
+      } else if (name.startsWith('analytics_')) {
+        result = await handleAnalyticsTool(name, args, API_KEY);
+      } else if (name.startsWith('reply_')) {
+        result = await handleReplyTool(name, args, API_KEY);
+      } else if (name.startsWith('webhook_')) {
+        result = await handleWebhookTool(name, args, API_KEY);
+      } else {
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+      }
+
+      return result;
+    } catch (error) {
+      console.error(`[MCP] Tool execution error:`, error);
+      
+      if (error instanceof McpError) {
+        throw error;
+      }
+      
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  });
+
+  // Create stdio transport
   const transport = new StdioServerTransport();
+  
+  // Start the server
   await server.connect(transport);
-  console.error('Smartlead MCP Server running on stdio');
+  console.error('SmartLead MCP Server running on stdio');
 }
 
-runServer().catch((error) => {
+// Run the server
+main().catch((error) => {
   console.error('Fatal error:', error);
   process.exit(1);
 });
