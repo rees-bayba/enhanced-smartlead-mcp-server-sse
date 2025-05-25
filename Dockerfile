@@ -7,7 +7,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies - use npm ci if lock file exists, otherwise npm install
-RUN if [ -f "package-lock.json" ]; then npm ci --ignore-scripts; else npm install; fi
+# --ignore-scripts prevents the "prepare" script from running before we have source files
+RUN if [ -f "package-lock.json" ]; then npm ci --ignore-scripts; else npm install --ignore-scripts; fi
 
 # Copy the rest of the application source code
 COPY . .
@@ -26,7 +27,8 @@ ENV NODE_ENV production
 COPY --from=builder /app/package*.json ./
 
 # Install only production dependencies
-RUN if [ -f "package-lock.json" ]; then npm ci --omit=dev --ignore-scripts; else npm install --omit=dev; fi
+# --ignore-scripts for consistency and security
+RUN if [ -f "package-lock.json" ]; then npm ci --omit=dev --ignore-scripts; else npm install --omit=dev --ignore-scripts; fi
 
 # Copy the built application from the builder stage
 # Assuming the build output is in the 'dist' directory
