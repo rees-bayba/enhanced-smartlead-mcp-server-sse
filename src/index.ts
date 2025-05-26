@@ -45,10 +45,27 @@ class SmartLeadClient {
       });
       return response.data;
     } catch (error: any) {
+      // Enhanced error reporting for debugging
+      const errorDetails = {
+        endpoint,
+        method,
+        url,
+        params: method === 'GET' ? { ...data, api_key: '[REDACTED]' } : { api_key: '[REDACTED]' },
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        responseData: error.response?.data,
+        message: error.message
+      };
+      
+      console.error('SmartLead API Error Details:', JSON.stringify(errorDetails, null, 2));
+      
       if (error.response?.status === 404) {
         throw new Error(`This Smartlead API endpoint does not exist: ${endpoint}`);
       }
-      throw new Error(`SmartLead API error: ${error.response?.data?.message || error.message}`);
+      
+      // Provide more specific error messages
+      const apiError = error.response?.data?.error || error.response?.data?.message || error.message;
+      throw new Error(`SmartLead API error: ${apiError}`);
     }
   }
 
@@ -114,7 +131,9 @@ class SmartLeadClient {
   }
 
   async getCampaignStatistics(campaignId: string, params?: any) {
-    return this.request(`/campaigns/${campaignId}/statistics`, 'GET', params);
+    // Remove campaign_id from params if it exists (since it's in the URL path)
+    const { campaign_id, ...cleanParams } = params || {};
+    return this.request(`/campaigns/${campaignId}/statistics`, 'GET', cleanParams);
   }
 
   // Lead endpoints
@@ -1070,7 +1089,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await client.getCampaignAnalyticsByDate(params.campaign_id, params.start_date, params.end_date);
         break;
       case 'get_campaign_statistics':
-        result = await client.getCampaignStatistics(params.campaign_id, params);
+        // CRITICAL FIX: Remove campaign_id from params to avoid parameter contamination
+        const { campaign_id, ...statsParams } = params;
+        result = await client.getCampaignStatistics(campaign_id, statsParams);
         break;
       
       // Lead tools
@@ -1081,7 +1102,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await client.getLeadsFromCampaign(params.campaign_id, params.offset, params.limit);
         break;
       case 'update_lead':
-        result = await client.updateLead(params.campaign_id, params.lead_id, params);
+        // Clean parameter separation for lead updates
+        const { campaign_id: cId, lead_id, ...updateData } = params;
+        result = await client.updateLead(cId, lead_id, updateData);
         break;
       case 'delete_lead':
         result = await client.deleteLead(params.campaign_id, params.lead_id);
